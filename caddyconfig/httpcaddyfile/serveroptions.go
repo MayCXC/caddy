@@ -17,6 +17,7 @@ package httpcaddyfile
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/dustin/go-humanize"
 
@@ -32,6 +33,9 @@ type serverOptions struct {
 	// listener address that matches exactly. If empty, will apply to all
 	// servers that were not already matched by another serverOptions.
 	ListenerAddress string
+
+	// The file descriptor of a socket bound to ListenerAddress if it was opened in a parent process
+	Socket *int
 
 	// These will all map 1:1 to the caddyhttp.Server struct
 	Name                 string
@@ -65,6 +69,20 @@ func unmarshalCaddyfileServerOptions(d *caddyfile.Dispenser) (any, error) {
 	}
 	for d.NextBlock(0) {
 		switch d.Val() {
+		case "socket":
+			if serverOpts.ListenerAddress == "" {
+				return nil, d.Errf("cannot set a socket for a server without a listener address")
+			}
+			if !d.NextArg() {
+				return nil, d.ArgErr()
+			}
+			socket, err := strconv.ParseInt(d.Val(),0,strconv.IntSize)
+			if(err != nil) {
+				return nil, d.WrapErr(err)
+			}
+			isocket := int(socket)
+			serverOpts.Socket = &isocket
+
 		case "name":
 			if serverOpts.ListenerAddress == "" {
 				return nil, d.Errf("cannot set a name for a server without a listener address")
@@ -286,24 +304,35 @@ func applyServerOptions(
 	// collect the server name overrides
 	nameReplacements := map[string]string{}
 
-	for key, server := range servers {
-		// find the options that apply to this server
-		opts := func() *serverOptions {
-			for _, entry := range serverOpts {
-				if entry.ListenerAddress == "" {
-					return &entry
-				}
-				for _, listener := range server.Listen {
-					if entry.ListenerAddress == listener {
-						return &entry
-					}
-				}
-			}
-			return nil
-		}()
+	// group server options by their listener address
+	listenerServerOpts := map[string]*serverOptions{}
+	for _, entry := range serverOpts {
+		if _, ok := listenerServerOpts[entry.ListenerAddress]; !ok {
+			listenerServerOpts[entry.ListenerAddress] = &entry
+		}
+	}
 
+	for key, server := range servers {
+		// each server can have at most one socket fd per listener address
+		server.Socket = make([]*int, len(server.Listen))
+
+		var opts *serverOptions
+		// find the options that apply to this server
+		for lin, listener := range server.Listen {
+			nextOpts, ok := listenerServerOpts[listener]
+			if ok {
+				if opts == nil {
+					opts = nextOpts
+				}
+				// set the options that apply to each listener for this server
+				server.Socket[lin] = nextOpts.Socket
+			}
+		}
+		if(opts == nil) {
+			opts = listenerServerOpts[""]
+		}
 		// if none apply, then move to the next server
-		if opts == nil {
+		if(opts == nil) {
 			continue
 		}
 

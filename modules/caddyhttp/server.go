@@ -222,6 +222,10 @@ type Server struct {
 	// This setting is EXPERIMENTAL and subject to change.
 	Metrics *Metrics `json:"metrics,omitempty"`
 
+	// Socket file descriptors that can be used to create a
+	// FileListener/FilePacketConn bound to each parallel address in Listen.
+	Socket []*int
+
 	name string
 
 	primaryHandlerChain Handler

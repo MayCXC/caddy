@@ -129,6 +129,10 @@ func (na NetworkAddress) ListenAll(ctx context.Context, config net.ListenConfig)
 // it even if the previous program using it exited uncleanly; it will also be
 // unlinked upon a graceful exit (or when a new config does not use that socket).
 func (na NetworkAddress) Listen(ctx context.Context, portOffset uint, config net.ListenConfig) (any, error) {
+	return na.ListenWithSocket(ctx, portOffset, config, nil)
+}
+
+func (na NetworkAddress) ListenWithSocket(ctx context.Context, portOffset uint, config net.ListenConfig, socket *int) (any, error) {
 	if na.IsUnixNetwork() {
 		unixSocketsMu.Lock()
 		defer unixSocketsMu.Unlock()
@@ -140,10 +144,10 @@ func (na NetworkAddress) Listen(ctx context.Context, portOffset uint, config net
 	}
 
 	// create (or reuse) the listener ourselves
-	return na.listen(ctx, portOffset, config)
+	return na.listen(ctx, portOffset, config, socket)
 }
 
-func (na NetworkAddress) listen(ctx context.Context, portOffset uint, config net.ListenConfig) (any, error) {
+func (na NetworkAddress) listen(ctx context.Context, portOffset uint, config net.ListenConfig, socket *int) (any, error) {
 	var (
 		ln                   any
 		err                  error
@@ -151,7 +155,6 @@ func (na NetworkAddress) listen(ctx context.Context, portOffset uint, config net
 		unixFileMode         fs.FileMode
 		isAbstractUnixSocket bool
 	)
-
 	// split unix socket addr early so lnKey
 	// is independent of permissions bits
 	if na.IsUnixNetwork() {
@@ -160,32 +163,49 @@ func (na NetworkAddress) listen(ctx context.Context, portOffset uint, config net
 		if err != nil {
 			return nil, err
 		}
-		isAbstractUnixSocket = strings.HasPrefix(address, "@")
 	} else {
 		address = na.JoinHostPort(portOffset)
 	}
 
-	// if this is a unix socket, see if we already have it open,
-	// force socket permissions on it and return early
-	if socket, err := reuseUnixSocket(na.Network, address); socket != nil || err != nil {
-		if !isAbstractUnixSocket {
-			if err := os.Chmod(address, unixFileMode); err != nil {
-				return nil, fmt.Errorf("unable to set permissions (%s) on %s: %v", unixFileMode, address, err)
-			}
-		}
-		return socket, err
-	}
-
 	lnKey := listenerKey(na.Network, address)
 
-	if strings.HasPrefix(na.Network, "ip") {
-		ln, err = config.ListenPacket(ctx, na.Network, address)
-	} else {
-		ln, err = listenReusable(ctx, lnKey, na.Network, address, config)
+	var socketFile *os.File
+	if socket != nil {
+		socketFile = socketFiles[*socket]
+		if socketFile == nil {
+			socketFile = os.NewFile(uintptr(*socket),lnKey)
+			socketFiles[*socket] = socketFile
+		}
 	}
+
+	if na.IsUnixNetwork() {
+		isAbstractUnixSocket = strings.HasPrefix(address, "@")
+		// if this is a unix socket, see if we already have it open,
+		// force socket permissions on it and return early
+		if unixSocket, err := reuseUnixSocketWithUnlink(na.Network, address, socketFile == nil); unixSocket != nil || err != nil {
+			if !isAbstractUnixSocket {
+				if err := os.Chmod(address, unixFileMode); err != nil {
+					return nil, fmt.Errorf("unable to set permissions (%s) on %s: %v", unixFileMode, address, err)
+				}
+			}
+			return unixSocket, err
+		}
+	}
+
+	if strings.HasPrefix(na.Network, "ip") {
+		if socketFile != nil {
+			ln, err = net.FilePacketConn(socketFile)
+		} else {
+			ln, err = config.ListenPacket(ctx, na.Network, address)
+		}
+	} else {
+		ln, err = listenReusableWithSocketFile(ctx, lnKey, na.Network, address, config, socketFile)
+	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	if ln == nil {
 		return nil, fmt.Errorf("unsupported network type: %s", na.Network)
 	}
@@ -665,3 +685,6 @@ type ListenerWrapper interface {
 var listenerPool = NewUsagePool()
 
 const maxPortSpan = 65535
+
+// socketFiles is an int -> *os.File map used to make a FileListener/FilePacketConn from a socket file descriptor.
+var socketFiles = map[int]*os.File{}

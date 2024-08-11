@@ -28,7 +28,6 @@ import (
 	"os"
 	"sync/atomic"
 	"syscall"
-
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
 )
@@ -36,10 +35,10 @@ import (
 // reuseUnixSocket copies and reuses the unix domain socket (UDS) if we already
 // have it open; if not, unlink it so we can have it. No-op if not a unix network.
 func reuseUnixSocket(network, addr string) (any, error) {
-	if !IsUnixNetwork(network) {
-		return nil, nil
-	}
+	return reuseUnixSocketWithUnlink(network, addr, true)
+}
 
+func reuseUnixSocketWithUnlink(network, addr string, unlink bool) (any, error) {
 	socketKey := listenerKey(network, addr)
 
 	socket, exists := unixSockets[socketKey]
@@ -71,25 +70,32 @@ func reuseUnixSocket(network, addr string) (any, error) {
 				return nil, err
 			}
 			atomic.AddInt32(unixSocket.count, 1)
-			unixSockets[socketKey] = &unixConn{pc.(*net.UnixConn), addr, socketKey, unixSocket.count}
+			unixSockets[socketKey] = &unixConn{pc.(*net.UnixConn), socketKey, unixSocket.count}
 		}
 
 		return unixSockets[socketKey], nil
 	}
 
-	// from what I can tell after some quick research, it's quite common for programs to
-	// leave their socket file behind after they close, so the typical pattern is to
-	// unlink it before you bind to it -- this is often crucial if the last program using
-	// it was killed forcefully without a chance to clean up the socket, but there is a
-	// race, as the comment in net.UnixListener.close() explains... oh well, I guess?
-	if err := syscall.Unlink(addr); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, err
+	// we will leave a UDS linked if we already have an open fd
+	if unlink {
+		// from what I can tell after some quick research, it's quite common for programs to
+		// leave their socket file behind after they close, so the typical pattern is to
+		// unlink it before you bind to it -- this is often crucial if the last program using
+		// it was killed forcefully without a chance to clean up the socket, but there is a
+		// race, as the comment in net.UnixListener.close() explains... oh well, I guess?
+		if err := syscall.Unlink(addr); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
 	}
 
 	return nil, nil
 }
 
 func listenReusable(ctx context.Context, lnKey string, network, address string, config net.ListenConfig) (any, error) {
+	return listenReusableWithSocketFile(ctx, lnKey, network, address, config, nil)
+}
+
+func listenReusableWithSocketFile(ctx context.Context, lnKey string, network, address string, config net.ListenConfig, socketFile *os.File) (any, error) {
 	// wrap any Control function set by the user so we can also add our reusePort control without clobbering theirs
 	oldControl := config.Control
 	config.Control = func(network, address string, c syscall.RawConn) error {
@@ -100,6 +106,7 @@ func listenReusable(ctx context.Context, lnKey string, network, address string, 
 		}
 		return reusePort(network, address, c)
 	}
+	// TODO can we make sure SO_REUSEPORT is set on file?
 
 	// even though SO_REUSEPORT lets us bind the socket multiple times,
 	// we still put it in the listenerPool so we can count how many
@@ -107,38 +114,56 @@ func listenReusable(ctx context.Context, lnKey string, network, address string, 
 	// whether to enforce shutdown delays, for example (see #5393).
 	var ln io.Closer
 	var err error
+
+	var isudp bool
 	switch network {
 	case "udp", "udp4", "udp6", "unixgram":
-		ln, err = config.ListenPacket(ctx, network, address)
+		isudp = true
 	default:
-		ln, err = config.Listen(ctx, network, address)
+		isudp = false
 	}
+
+	// if we already have an open fd for the socket, we will not bind it
+	if socketFile != nil {
+		if(isudp) {
+			ln, err = net.FilePacketConn(socketFile)
+		} else {
+			ln, err = net.FileListener(socketFile)
+		}
+	} else {
+		if(isudp) {
+			ln, err = config.ListenPacket(ctx, network, address)
+			// TODO: Not 100% sure this is necessary, but we do this for net.UnixListener in listen_unix.go, so...
+			if unix, ok := ln.(*net.UnixConn); ok {
+				one := int32(1)
+				ln = &unixConn{unix, lnKey, &one}
+				unixSockets[lnKey] = ln.(*unixConn)
+			}
+			// lightly wrap the connection so that when it is closed,
+			// we can decrement the usage pool counter
+			if specificLn, ok := ln.(net.PacketConn); ok {
+				ln = deletePacketConn{specificLn, lnKey}
+			}
+		} else {
+			ln, err = config.Listen(ctx, network, address)
+			// if new listener is a unix socket, make sure we can reuse it later
+			// (we do our own "unlink on close" -- not required, but more tidy)
+			if unix, ok := ln.(*net.UnixListener); ok {
+				unix.SetUnlinkOnClose(false)
+				one := int32(1)
+				ln = &unixListener{unix, lnKey, &one}
+				unixSockets[lnKey] = ln.(*unixListener)
+			}
+			// lightly wrap the listener so that when it is closed,
+			// we can decrement the usage pool counter
+			if specificLn, ok := ln.(net.Listener); ok {
+				ln = deleteListener{specificLn, lnKey}
+			}
+		}
+	}
+
 	if err == nil {
 		listenerPool.LoadOrStore(lnKey, nil)
-	}
-
-	// if new listener is a unix socket, make sure we can reuse it later
-	// (we do our own "unlink on close" -- not required, but more tidy)
-	one := int32(1)
-	if unix, ok := ln.(*net.UnixListener); ok {
-		unix.SetUnlinkOnClose(false)
-		ln = &unixListener{unix, lnKey, &one}
-		unixSockets[lnKey] = ln.(*unixListener)
-	}
-
-	// TODO: Not 100% sure this is necessary, but we do this for net.UnixListener in listen_unix.go, so...
-	if unix, ok := ln.(*net.UnixConn); ok {
-		ln = &unixConn{unix, address, lnKey, &one}
-		unixSockets[lnKey] = ln.(*unixConn)
-	}
-
-	// lightly wrap the listener so that when it is closed,
-	// we can decrement the usage pool counter
-	switch specificLn := ln.(type) {
-	case net.Listener:
-		return deleteListener{specificLn, lnKey}, err
-	case net.PacketConn:
-		return deletePacketConn{specificLn, lnKey}, err
 	}
 
 	// other types, I guess we just return them directly
@@ -183,7 +208,6 @@ func (uln *unixListener) Close() error {
 
 type unixConn struct {
 	*net.UnixConn
-	filename string
 	mapKey   string
 	count    *int32 // accessed atomically
 }
@@ -195,7 +219,7 @@ func (uc *unixConn) Close() error {
 			unixSocketsMu.Lock()
 			delete(unixSockets, uc.mapKey)
 			unixSocketsMu.Unlock()
-			_ = syscall.Unlink(uc.filename)
+			_ = syscall.Unlink(uc.LocalAddr().String())
 		}()
 	}
 	return uc.UnixConn.Close()
