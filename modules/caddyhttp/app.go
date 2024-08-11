@@ -253,6 +253,17 @@ func (app *App) Provision(ctx caddy.Context) error {
 			srv.Listen[i] = lnOut
 		}
 
+		// process each socket fd
+		for i, soIn := range srv.Socket {
+			if soIn != nil {
+				soOut, err := repl.ReplaceOrErr(*soIn, true, true)
+				if err != nil {
+					return fmt.Errorf("server %s, socket %d: %v", srvName, i, err)
+				}
+				srv.Socket[i] = &soOut
+			}
+		}
+
 		// set up each listener modifier
 		if srv.ListenerWrappersRaw != nil {
 			vals, err := ctx.LoadModule(srv, "ListenerWrappersRaw")

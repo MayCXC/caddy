@@ -17,7 +17,6 @@ package httpcaddyfile
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	"github.com/dustin/go-humanize"
 
@@ -35,7 +34,7 @@ type serverOptions struct {
 	ListenerAddress string
 
 	// The file descriptor of a socket bound to ListenerAddress if it was opened in a parent process
-	Socket *int
+	Socket *string
 
 	// These will all map 1:1 to the caddyhttp.Server struct
 	Name                 string
@@ -76,12 +75,8 @@ func unmarshalCaddyfileServerOptions(d *caddyfile.Dispenser) (any, error) {
 			if !d.NextArg() {
 				return nil, d.ArgErr()
 			}
-			socket, err := strconv.ParseInt(d.Val(),0,strconv.IntSize)
-			if(err != nil) {
-				return nil, d.WrapErr(err)
-			}
-			isocket := int(socket)
-			serverOpts.Socket = &isocket
+			socket := d.Val()
+			serverOpts.Socket = &socket
 
 		case "name":
 			if serverOpts.ListenerAddress == "" {
@@ -314,7 +309,7 @@ func applyServerOptions(
 
 	for key, server := range servers {
 		// each server can have at most one socket fd per listener address
-		server.Socket = make([]*int, len(server.Listen))
+		server.Socket = make([]*string, len(server.Listen))
 
 		var opts *serverOptions
 		// find the options that apply to this server

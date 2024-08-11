@@ -132,7 +132,7 @@ func (na NetworkAddress) Listen(ctx context.Context, portOffset uint, config net
 	return na.ListenWithSocket(ctx, portOffset, config, nil)
 }
 
-func (na NetworkAddress) ListenWithSocket(ctx context.Context, portOffset uint, config net.ListenConfig, socket *int) (any, error) {
+func (na NetworkAddress) ListenWithSocket(ctx context.Context, portOffset uint, config net.ListenConfig, socket *string) (any, error) {
 	if na.IsUnixNetwork() {
 		unixSocketsMu.Lock()
 		defer unixSocketsMu.Unlock()
@@ -147,7 +147,7 @@ func (na NetworkAddress) ListenWithSocket(ctx context.Context, portOffset uint, 
 	return na.listen(ctx, portOffset, config, socket)
 }
 
-func (na NetworkAddress) listen(ctx context.Context, portOffset uint, config net.ListenConfig, socket *int) (any, error) {
+func (na NetworkAddress) listen(ctx context.Context, portOffset uint, config net.ListenConfig, socket *string) (any, error) {
 	var (
 		ln                   any
 		err                  error
@@ -171,10 +171,15 @@ func (na NetworkAddress) listen(ctx context.Context, portOffset uint, config net
 
 	var socketFile *os.File
 	if socket != nil {
-		socketFile = socketFiles[*socket]
+		psocket, err := strconv.ParseUint(*socket,0,strconv.IntSize)
+		if(err != nil) {
+			return nil, err
+		}
+		fd := uintptr(psocket)
+		socketFile = socketFiles[fd]
 		if socketFile == nil {
-			socketFile = os.NewFile(uintptr(*socket),lnKey)
-			socketFiles[*socket] = socketFile
+			socketFile = os.NewFile(fd,lnKey)
+			socketFiles[fd] = socketFile
 		}
 	}
 
@@ -686,5 +691,5 @@ var listenerPool = NewUsagePool()
 
 const maxPortSpan = 65535
 
-// socketFiles is an int -> *os.File map used to make a FileListener/FilePacketConn from a socket file descriptor.
-var socketFiles = map[int]*os.File{}
+// socketFiles is a fd -> *os.File map used to make a FileListener/FilePacketConn from a socket file descriptor.
+var socketFiles = map[uintptr]*os.File{}

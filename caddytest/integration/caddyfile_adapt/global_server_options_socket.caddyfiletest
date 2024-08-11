@@ -1,8 +1,8 @@
 {
-	servers tcp/:80 {
+	servers :80 {
 		socket {env.CADDY_HTTP_FD}
 	}
-	servers tcp/:443 {
+	servers :443 {
 		socket {env.CADDY_HTTPS_FD}
 	}
 	servers udp/:443 {
@@ -10,7 +10,15 @@
 	}
 }
 
-localhost
+foo.com:80 {
+	bind tcp/
+}
+
+foo.com:443 {
+	bind tcp/
+	bind udp/
+}
+
 ----------
 {
 	"apps": {
@@ -18,26 +26,44 @@ localhost
 			"servers": {
 				"srv0": {
 					"listen": [
-						"tcp/:80"
+						":443",
+						"udp/:443"
+					],
+					"routes": [
+						{
+							"match": [
+								{
+									"host": [
+										"foo.com"
+									]
+								}
+							],
+							"terminal": true
+						}
 					],
 					"socket": [
+						"{env.CADDY_HTTP_FD}",
 						"{env.CADDY_HTTP_FD}"
 					]
 				},
 				"srv1": {
 					"listen": [
-						"tcp/:443"
+						":80"
+					],
+					"routes": [
+						{
+							"match": [
+								{
+									"host": [
+										"foo.com"
+									]
+								}
+							],
+							"terminal": true
+						}
 					],
 					"socket": [
-						"{env.CADDY_HTTPS_FD}"
-					]
-				},
-				"srv2": {
-					"listen": [
-						"udp/:443"
-					],
-					"socket": [
-						"{env.CADDY_HTTP3_FD}"
+						"{env.CADDY_HTTP_FD}"
 					]
 				}
 			}

@@ -224,7 +224,7 @@ type Server struct {
 
 	// Socket file descriptors that can be used to create a
 	// FileListener/FilePacketConn bound to each parallel address in Listen.
-	Socket []*int
+	Socket []*string `json:"socket,omitempty"`
 
 	name string
 
