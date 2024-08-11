@@ -434,8 +434,6 @@ func (app *App) Start() error {
 		}
 
 		for lnIndex, lnAddr := range srv.Listen {
-			socket := srv.Socket[lnIndex]
-
 			listenAddr, err := caddy.ParseNetworkAddress(lnAddr)
 			if err != nil {
 				return fmt.Errorf("%s: parsing listen address '%s': %v", srvName, lnAddr, err)
@@ -445,6 +443,10 @@ func (app *App) Start() error {
 			for portOffset := uint(0); portOffset < listenAddr.PortRangeSize(); portOffset++ {
 				// create the listener for this socket
 				hostport := listenAddr.JoinHostPort(portOffset)
+				var socket *string
+				if srv.Socket != nil {
+					socket = srv.Socket[lnIndex]
+				}
 				lnAny, err := listenAddr.ListenWithSocket(app.ctx, portOffset, net.ListenConfig{KeepAlive: time.Duration(srv.KeepAliveInterval)}, socket)
 				if err != nil {
 					return fmt.Errorf("listening on %s: %v", listenAddr.At(portOffset), err)
