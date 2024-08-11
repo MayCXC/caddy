@@ -323,11 +323,11 @@ func applyServerOptions(
 				server.Socket[lin] = nextOpts.Socket
 			}
 		}
-		if(opts == nil) {
+		if opts == nil {
 			opts = listenerServerOpts[""]
 		}
 		// if none apply, then move to the next server
-		if(opts == nil) {
+		if opts == nil {
 			continue
 		}
 

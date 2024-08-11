@@ -125,13 +125,13 @@ func listenReusableWithSocketFile(ctx context.Context, lnKey string, network, ad
 
 	// if we already have an open fd for the socket, we will not bind it
 	if socketFile != nil {
-		if(isudp) {
+		if isudp {
 			ln, err = net.FilePacketConn(socketFile)
 		} else {
 			ln, err = net.FileListener(socketFile)
 		}
 	} else {
-		if(isudp) {
+		if isudp {
 			ln, err = config.ListenPacket(ctx, network, address)
 			// TODO: Not 100% sure this is necessary, but we do this for net.UnixListener in listen_unix.go, so...
 			if unix, ok := ln.(*net.UnixConn); ok {

@@ -172,7 +172,7 @@ func (na NetworkAddress) listen(ctx context.Context, portOffset uint, config net
 	var socketFile *os.File
 	if socket != nil {
 		psocket, err := strconv.ParseUint(*socket,0,strconv.IntSize)
-		if(err != nil) {
+		if err != nil {
 			return nil, err
 		}
 		fd := uintptr(psocket)
