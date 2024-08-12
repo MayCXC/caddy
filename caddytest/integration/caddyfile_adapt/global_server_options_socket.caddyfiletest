@@ -42,8 +42,8 @@ foo.com:443 {
 						}
 					],
 					"socket": [
-						"{env.CADDY_HTTP_FD}",
-						"{env.CADDY_HTTP_FD}"
+						"{env.CADDY_HTTPS_FD}",
+						"{env.CADDY_HTTP3_FD}"
 					]
 				},
 				"srv1": {
