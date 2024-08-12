@@ -303,7 +303,8 @@ func applyServerOptions(
 	listenerServerOpts := map[string]*serverOptions{}
 	for _, entry := range serverOpts {
 		if _, ok := listenerServerOpts[entry.ListenerAddress]; !ok {
-			listenerServerOpts[entry.ListenerAddress] = &entry
+			mapEntry := entry
+			listenerServerOpts[entry.ListenerAddress] = &mapEntry
 		}
 	}
 
