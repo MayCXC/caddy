@@ -536,7 +536,7 @@ func (st *ServerType) serversFromPairings(
 					if k == j {
 						continue
 					}
-					if sliceContains(sblock2.block.GetKeysText(), key) {
+					if caddy.SliceContains(sblock2.block.GetKeysText(), key) {
 						return nil, fmt.Errorf("ambiguous site definition: %s", key)
 					}
 				}
@@ -720,7 +720,7 @@ func (st *ServerType) serversFromPairings(
 						if srv.AutoHTTPS == nil {
 							srv.AutoHTTPS = new(caddyhttp.AutoHTTPSConfig)
 						}
-						if !sliceContains(srv.AutoHTTPS.Skip, addr.Host) {
+						if !caddy.SliceContains(srv.AutoHTTPS.Skip, addr.Host) {
 							srv.AutoHTTPS.Skip = append(srv.AutoHTTPS.Skip, addr.Host)
 						}
 					}
@@ -734,7 +734,7 @@ func (st *ServerType) serversFromPairings(
 				// https://caddy.community/t/making-sense-of-auto-https-and-why-disabling-it-still-serves-https-instead-of-http/9761
 				createdTLSConnPolicies, ok := sblock.pile["tls.connection_policy"]
 				hasTLSEnabled := (ok && len(createdTLSConnPolicies) > 0) ||
-					(addr.Host != "" && srv.AutoHTTPS != nil && !sliceContains(srv.AutoHTTPS.Skip, addr.Host))
+					(addr.Host != "" && srv.AutoHTTPS != nil && !caddy.SliceContains(srv.AutoHTTPS.Skip, addr.Host))
 
 				// we'll need to remember if the address qualifies for auto-HTTPS, so we
 				// can add a TLS conn policy if necessary
@@ -1061,7 +1061,7 @@ func consolidateConnPolicies(cps caddytls.ConnectionPolicies) (caddytls.Connecti
 				} else if cps[i].CertSelection != nil && cps[j].CertSelection != nil {
 					// if both have one, then combine AnyTag
 					for _, tag := range cps[j].CertSelection.AnyTag {
-						if !sliceContains(cps[i].CertSelection.AnyTag, tag) {
+						if !caddy.SliceContains(cps[i].CertSelection.AnyTag, tag) {
 							cps[i].CertSelection.AnyTag = append(cps[i].CertSelection.AnyTag, tag)
 						}
 					}
@@ -1538,16 +1538,6 @@ func tryDuration(val any, warnings *[]caddyconfig.Warning) caddy.Duration {
 		*warnings = append(*warnings, caddyconfig.Warning{Message: "not a duration type"})
 	}
 	return durationVal
-}
-
-// sliceContains returns true if needle is in haystack.
-func sliceContains(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
 }
 
 // listenersUseAnyPortOtherThan returns true if there are any

@@ -154,6 +154,7 @@ func (na NetworkAddress) listen(ctx context.Context, portOffset uint, config net
 		address              string
 		unixFileMode         fs.FileMode
 		isAbstractUnixSocket bool
+		socketFile           *os.File
 	)
 	// split unix socket addr early so lnKey
 	// is independent of permissions bits
@@ -169,7 +170,6 @@ func (na NetworkAddress) listen(ctx context.Context, portOffset uint, config net
 
 	lnKey := listenerKey(na.Network, address)
 
-	var socketFile *os.File
 	if socket != nil {
 		psocket, err := strconv.ParseUint(*socket,0,strconv.IntSize)
 		if err != nil {
@@ -431,10 +431,14 @@ func JoinNetworkAddress(network, host, port string) string {
 //
 // NOTE: This API is EXPERIMENTAL and may be changed or removed.
 func (na NetworkAddress) ListenQUIC(ctx context.Context, portOffset uint, config net.ListenConfig, tlsConf *tls.Config) (http3.QUICEarlyListener, error) {
+	return na.ListenQUICWithSocket(ctx, portOffset, config, tlsConf, nil)
+}
+
+func (na NetworkAddress) ListenQUICWithSocket(ctx context.Context, portOffset uint, config net.ListenConfig, tlsConf *tls.Config, socket *string) (http3.QUICEarlyListener, error) {
 	lnKey := listenerKey("quic"+na.Network, na.JoinHostPort(portOffset))
 
 	sharedEarlyListener, _, err := listenerPool.LoadOrNew(lnKey, func() (Destructor, error) {
-		lnAny, err := na.Listen(ctx, portOffset, config)
+		lnAny, err := na.ListenWithSocket(ctx, portOffset, config, socket)
 		if err != nil {
 			return nil, err
 		}

@@ -35,6 +35,8 @@ type serverOptions struct {
 
 	// The file descriptor of a socket bound to ListenerAddress if it was opened in a parent process
 	Socket *string
+	// The protocols supported by ListenerAddress
+	Protocols            []string
 
 	// These will all map 1:1 to the caddyhttp.Server struct
 	Name                 string
@@ -46,7 +48,6 @@ type serverOptions struct {
 	KeepAliveInterval    caddy.Duration
 	MaxHeaderBytes       int
 	EnableFullDuplex     bool
-	Protocols            []string
 	StrictSNIHost        *bool
 	TrustedProxiesRaw    json.RawMessage
 	TrustedProxiesStrict int
@@ -193,7 +194,7 @@ func unmarshalCaddyfileServerOptions(d *caddyfile.Dispenser) (any, error) {
 				if proto != "h1" && proto != "h2" && proto != "h2c" && proto != "h3" {
 					return nil, d.Errf("unknown protocol '%s': expected h1, h2, h2c, or h3", proto)
 				}
-				if sliceContains(serverOpts.Protocols, proto) {
+				if caddy.SliceContains(serverOpts.Protocols, proto) {
 					return nil, d.Errf("protocol %s specified more than once", proto)
 				}
 				serverOpts.Protocols = append(serverOpts.Protocols, proto)
@@ -242,7 +243,7 @@ func unmarshalCaddyfileServerOptions(d *caddyfile.Dispenser) (any, error) {
 		case "client_ip_headers":
 			headers := d.RemainingArgs()
 			for _, header := range headers {
-				if sliceContains(serverOpts.ClientIPHeaders, header) {
+				if caddy.SliceContains(serverOpts.ClientIPHeaders, header) {
 					return nil, d.Errf("client IP header %s specified more than once", header)
 				}
 				serverOpts.ClientIPHeaders = append(serverOpts.ClientIPHeaders, header)
@@ -311,6 +312,7 @@ func applyServerOptions(
 	for key, server := range servers {
 		// each server can have at most one socket fd per listener address
 		server.Socket = make([]*string, len(server.Listen))
+		server.Protocols = make([][]string, len(server.Listen))
 
 		var opts *serverOptions
 		// find the options that apply to this server
@@ -322,6 +324,7 @@ func applyServerOptions(
 				}
 				// set the options that apply to each listener for this server
 				server.Socket[lin] = nextOpts.Socket
+				server.Protocols[lin] = nextOpts.Protocols
 			}
 		}
 		if opts == nil {
@@ -341,7 +344,6 @@ func applyServerOptions(
 		server.KeepAliveInterval = opts.KeepAliveInterval
 		server.MaxHeaderBytes = opts.MaxHeaderBytes
 		server.EnableFullDuplex = opts.EnableFullDuplex
-		server.Protocols = opts.Protocols
 		server.StrictSNIHost = opts.StrictSNIHost
 		server.TrustedProxiesRaw = opts.TrustedProxiesRaw
 		server.ClientIPHeaders = opts.ClientIPHeaders

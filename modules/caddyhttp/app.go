@@ -203,15 +203,15 @@ func (app *App) Provision(ctx caddy.Context) error {
 			}
 		}
 
-		// the Go standard library does not let us serve only HTTP/2 using
-		// http.Server; we would probably need to write our own server
-		if !srv.protocol("h1") && (srv.protocol("h2") || srv.protocol("h2c")) {
-			return fmt.Errorf("server %s: cannot enable HTTP/2 or H2C without enabling HTTP/1.1; add h1 to protocols or remove h2/h2c", srvName)
-		}
-
-		// if no protocols configured explicitly, enable all except h2c
-		if len(srv.Protocols) == 0 {
-			srv.Protocols = []string{"h1", "h2", "h3"}
+		for pi, ps := range srv.Protocols {
+			// if no protocols configured explicitly, enable all except h2c
+			if ps == nil {
+				srv.Protocols[pi] = []string{"h1", "h2", "h3"}
+			} else if !caddy.SliceContains(ps, "h1") && (caddy.SliceContains(ps, "h2") || caddy.SliceContains(ps, "h2c")) {
+				// the Go standard library does not let us serve only HTTP/2 using
+				// http.Server; we would probably need to write our own server
+				return fmt.Errorf("server %s: cannot enable HTTP/2 or H2C without enabling HTTP/1.1; add h1 to protocols or remove h2/h2c", srvName)
+			}
 		}
 
 		// if not explicitly configured by the user, disallow TLS
@@ -440,6 +440,45 @@ func (app *App) Start() error {
 			}
 			srv.addresses = append(srv.addresses, listenAddr)
 
+			// check that protocols can be enabled based on network
+			pok := map[string]bool{
+				"h1": false,
+				"h2": false,
+				"h2c": false,
+				"h3": false,
+			}
+
+			for _, p := range srv.Protocols[lnIndex] {
+				pok[p] = true
+			}
+
+			if listenAddr.IsUnixNetwork() {
+				// Can only serve HTTP/1 and HTTP/2 on a SOCK_STREAM UDS
+				if listenAddr.Network != "unix" && (pok["h1"] || pok["h2"] || pok["h2c"]) {
+					app.logger.Warn("HTTP/1 and HTTP/2 disabled because they require a unix network for a UDS",
+						zap.String("network", listenAddr.Network),
+						zap.String("file", listenAddr.Host))
+					pok["h1"] = false
+					pok["h2"] = false
+					pok["h2c"] = false
+				}
+				// Can only serve HTTP/3 on a SOCK_DGRAM UDS
+				if listenAddr.Network != "unixgram" && pok["h3"] {
+					app.logger.Warn("HTTP/3 disabled because it requires a unixgram network for a UDS",
+						zap.String("network", listenAddr.Network),
+						zap.String("file", listenAddr.Host))
+					pok["h3"] = false
+				}
+			}
+
+			// remove disabled protocols
+			srv.Protocols[lnIndex] = nil
+			for p, ok := range pok {
+				if ok {
+					srv.Protocols[lnIndex] = append(srv.Protocols[lnIndex], p)
+				}
+			}
+
 			for portOffset := uint(0); portOffset < listenAddr.PortRangeSize(); portOffset++ {
 				// create the listener for this socket
 				hostport := listenAddr.JoinHostPort(portOffset)
@@ -447,96 +486,97 @@ func (app *App) Start() error {
 				if srv.Socket != nil {
 					socket = srv.Socket[lnIndex]
 				}
-				lnAny, err := listenAddr.ListenWithSocket(app.ctx, portOffset, net.ListenConfig{KeepAlive: time.Duration(srv.KeepAliveInterval)}, socket)
-				if err != nil {
-					return fmt.Errorf("listening on %s: %v", listenAddr.At(portOffset), err)
-				}
-				ln := lnAny.(net.Listener)
-
-				// wrap listener before TLS (up to the TLS placeholder wrapper)
-				var lnWrapperIdx int
-				for i, lnWrapper := range srv.listenerWrappers {
-					if _, ok := lnWrapper.(*tlsPlaceholderWrapper); ok {
-						lnWrapperIdx = i + 1 // mark the next wrapper's spot
-						break
-					}
-					ln = lnWrapper.WrapListener(ln)
-				}
-
 				// enable TLS if there is a policy and if this is not the HTTP port
 				useTLS := len(srv.TLSConnPolicies) > 0 && int(listenAddr.StartPort+portOffset) != app.httpPort()
-				if useTLS {
-					// create TLS listener - this enables and terminates TLS
-					ln = tls.NewListener(ln, tlsCfg)
 
-					// enable HTTP/3 if configured
-					if srv.protocol("h3") {
-						// Can't serve HTTP/3 on the same socket as HTTP/1 and 2 because it uses
-						// a different transport mechanism... which is fine, but the OS doesn't
-						// differentiate between a SOCK_STREAM file and a SOCK_DGRAM file; they
-						// are still one file on the system. So even though "unixpacket" and
-						// "unixgram" are different network types just as "tcp" and "udp" are,
-						// the OS will not let us use the same file as both STREAM and DGRAM.
-						if len(srv.Protocols) > 1 && listenAddr.IsUnixNetwork() {
-							app.logger.Warn("HTTP/3 disabled because Unix can't multiplex STREAM and DGRAM on same socket",
-								zap.String("file", hostport))
-							for i := range srv.Protocols {
-								if srv.Protocols[i] == "h3" {
-									srv.Protocols = append(srv.Protocols[:i], srv.Protocols[i+1:]...)
-									break
-								}
-							}
-						} else {
-							app.logger.Info("enabling HTTP/3 listener", zap.String("addr", hostport))
-							if err := srv.serveHTTP3(listenAddr.At(portOffset), tlsCfg); err != nil {
-								return err
-							}
+				if pok["h1"] || pok["h2"] && useTLS || pok["h2c"] {
+					lnAny, err := listenAddr.ListenWithSocket(app.ctx, portOffset, net.ListenConfig{KeepAlive: time.Duration(srv.KeepAliveInterval)}, socket)
+					if err != nil {
+						return fmt.Errorf("listening on %s: %v", listenAddr.At(portOffset), err)
+					}
+					ln := lnAny.(net.Listener)
+
+					// wrap listener before TLS (up to the TLS placeholder wrapper)
+					var lnWrapperIdx int
+					for i, lnWrapper := range srv.listenerWrappers {
+						if _, ok := lnWrapper.(*tlsPlaceholderWrapper); ok {
+							lnWrapperIdx = i + 1 // mark the next wrapper's spot
+							break
 						}
+						ln = lnWrapper.WrapListener(ln)
 					}
-				}
 
-				// finish wrapping listener where we left off before TLS
-				for i := lnWrapperIdx; i < len(srv.listenerWrappers); i++ {
-					ln = srv.listenerWrappers[i].WrapListener(ln)
-				}
-
-				// handle http2 if use tls listener wrapper
-				if useTLS {
-					http2lnWrapper := &http2Listener{
-						Listener: ln,
-						server:   srv.server,
-						h2server: h2server,
+					if useTLS {
+						// create TLS listener - this enables and terminates TLS
+						ln = tls.NewListener(ln, tlsCfg)
 					}
-					srv.h2listeners = append(srv.h2listeners, http2lnWrapper)
-					ln = http2lnWrapper
+
+					// finish wrapping listener where we left off before TLS
+					for i := lnWrapperIdx; i < len(srv.listenerWrappers); i++ {
+						ln = srv.listenerWrappers[i].WrapListener(ln)
+					}
+
+					// handle http2 if use tls listener wrapper
+					if useTLS {
+						http2lnWrapper := &http2Listener{
+							Listener: ln,
+							server:   srv.server,
+							h2server: h2server,
+						}
+						srv.h2listeners = append(srv.h2listeners, http2lnWrapper)
+						ln = http2lnWrapper
+					}
+
+					// if binding to port 0, the OS chooses a port for us;
+					// but the user won't know the port unless we print it
+					if !listenAddr.IsUnixNetwork() && listenAddr.StartPort == 0 && listenAddr.EndPort == 0 {
+						app.logger.Info("port 0 listener",
+							zap.String("input_address", lnAddr),
+							zap.String("actual_address", ln.Addr().String()))
+					}
+
+					app.logger.Debug("starting server loop",
+						zap.String("address", ln.Addr().String()),
+						zap.Bool("tls", useTLS))
+
+					srv.listeners = append(srv.listeners, ln)
+
+					// enable HTTP/1 if configured
+					if pok["h1"] {
+						//nolint:errcheck
+						go srv.server.Serve(ln)
+					}
+				} else if pok["h2"] {
+					// Can only serve h2 with TLS enabled
+					app.logger.Warn("HTTP/2 skipped because it requires TLS",
+						zap.String("network", listenAddr.Network),
+						zap.String("file", hostport))
 				}
 
-				// if binding to port 0, the OS chooses a port for us;
-				// but the user won't know the port unless we print it
-				if !listenAddr.IsUnixNetwork() && listenAddr.StartPort == 0 && listenAddr.EndPort == 0 {
-					app.logger.Info("port 0 listener",
-						zap.String("input_address", lnAddr),
-						zap.String("actual_address", ln.Addr().String()))
-				}
-
-				app.logger.Debug("starting server loop",
-					zap.String("address", ln.Addr().String()),
-					zap.Bool("tls", useTLS),
-					zap.Bool("http3", srv.h3server != nil))
-
-				srv.listeners = append(srv.listeners, ln)
-
-				// enable HTTP/1 if configured
-				if srv.protocol("h1") {
-					//nolint:errcheck
-					go srv.server.Serve(ln)
+				// enable HTTP/3 if configured
+				if pok["h3"] && useTLS {
+					app.logger.Info("enabling HTTP/3 listener", zap.String("addr", hostport))
+					if err := srv.serveHTTP3(listenAddr.At(portOffset), tlsCfg, socket); err != nil {
+						return err
+					}
+					// zap.Bool("http3", srv.h3server != nil)
+				} else if pok["h3"] {
+					// Can only serve h3 with TLS enabled
+					app.logger.Warn("HTTP/3 disabled because it requires TLS",
+						zap.String("file", hostport))
 				}
 			}
 		}
 
-		srv.logger.Info("server running",
-			zap.String("name", srvName),
-			zap.Strings("protocols", srv.Protocols))
+		lnFields := make([]zap.Field, len(srv.Listen))
+		for lnIndex, lnAddr := range srv.Listen {
+			lnFields[lnIndex] = zap.Dict(lnAddr,
+				zap.Stringp("socket", srv.Socket[lnIndex]),
+				zap.Strings("protocols", srv.Protocols[lnIndex]),
+			)
+		}
+
+		srv.logger.Info("server running",append(lnFields, zap.String("name", srvName))...)
 	}
 
 	// finish automatic HTTPS by finally beginning

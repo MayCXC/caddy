@@ -188,7 +188,7 @@ type Server struct {
 	// to a non-null, empty struct.
 	Logs *ServerLogConfig `json:"logs,omitempty"`
 
-	// Protocols specifies which HTTP protocols to enable.
+	// Protocols specifies which HTTP protocols to enable for each parallel listen address.
 	// Supported values are:
 	//
 	// - `h1` (HTTP/1.1)
@@ -215,8 +215,8 @@ type Server struct {
 	// We recommend for most users to simply let Caddy use the
 	// default settings.
 	//
-	// Default: `[h1 h2 h3]`
-	Protocols []string `json:"protocols,omitempty"`
+	// Default: `[[h1 h2 h3]...]`
+	Protocols [][]string `json:"protocols,omitempty"`
 
 	// If set, metrics observations will be enabled.
 	// This setting is EXPERIMENTAL and subject to change.
@@ -574,9 +574,13 @@ func (s *Server) findLastRouteWithHostMatcher() int {
 // serveHTTP3 creates a QUIC listener, configures an HTTP/3 server if
 // not already done, and then uses that server to serve HTTP/3 over
 // the listener, with Server s as the handler.
-func (s *Server) serveHTTP3(addr caddy.NetworkAddress, tlsCfg *tls.Config) error {
-	addr.Network = getHTTP3Network(addr.Network)
-	h3ln, err := addr.ListenQUIC(s.ctx, 0, net.ListenConfig{}, tlsCfg)
+func (s *Server) serveHTTP3(addr caddy.NetworkAddress, tlsCfg *tls.Config, socket *string) error {
+	h3net, err := getHTTP3Network(addr.Network)
+	if err != nil {
+		return fmt.Errorf("starting HTTP/3 QUIC listener: %v", err)
+	}
+	addr.Network = h3net
+	h3ln, err := addr.ListenQUICWithSocket(s.ctx, 0, net.ListenConfig{}, tlsCfg, socket)
 	if err != nil {
 		return fmt.Errorf("starting HTTP/3 QUIC listener: %v", err)
 	}
@@ -812,9 +816,11 @@ func (s *Server) logRequest(
 
 // protocol returns true if the protocol proto is configured/enabled.
 func (s *Server) protocol(proto string) bool {
-	for _, p := range s.Protocols {
-		if p == proto {
-			return true
+	for _, ps := range s.Protocols {
+		for _, p := range ps {
+			if p == proto {
+				return true
+			}
 		}
 	}
 	return false
@@ -1060,7 +1066,11 @@ const (
 )
 
 var networkTypesHTTP3 = map[string]string{
-	"unix": "unixgram",
+	"unixgram": "unixgram",
+	"udp": "udp",
+	"udp4": "udp4",
+	"udp6": "udp6",
+	"tcp": "udp",
 	"tcp4": "udp4",
 	"tcp6": "udp6",
 }
@@ -1077,11 +1087,11 @@ func RegisterNetworkHTTP3(originalNetwork, h3Network string) {
 	networkTypesHTTP3[originalNetwork] = h3Network
 }
 
-func getHTTP3Network(originalNetwork string) string {
+// return a HTTP/3 compatible network or infer one if possible
+func getHTTP3Network(originalNetwork string) (string, error) {
 	h3Network, ok := networkTypesHTTP3[strings.ToLower(originalNetwork)]
 	if !ok {
-		// TODO: Maybe a better default is to not enable HTTP/3 if we do not know the network?
-		return "udp"
+		return "", fmt.Errorf("network (%s) cannot handle HTTP/3 connections", originalNetwork)
 	}
-	return h3Network
+	return h3Network, nil
 }

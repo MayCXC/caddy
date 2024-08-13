@@ -465,7 +465,7 @@ func fillInGlobalACMEDefaults(issuer certmagic.Issuer, options map[string]any) e
 	if globalACMECA != nil && acmeIssuer.CA == "" {
 		acmeIssuer.CA = globalACMECA.(string)
 	}
-	if globalACMECARoot != nil && !sliceContains(acmeIssuer.TrustedRootsPEMFiles, globalACMECARoot.(string)) {
+	if globalACMECARoot != nil && !caddy.SliceContains(acmeIssuer.TrustedRootsPEMFiles, globalACMECARoot.(string)) {
 		acmeIssuer.TrustedRootsPEMFiles = append(acmeIssuer.TrustedRootsPEMFiles, globalACMECARoot.(string))
 	}
 	if globalACMEDNS != nil && (acmeIssuer.Challenges == nil || acmeIssuer.Challenges.DNS == nil) {
@@ -634,7 +634,7 @@ outer:
 				} else {
 					// avoid repeated subjects
 					for _, subj := range aps[j].SubjectsRaw {
-						if !sliceContains(aps[i].SubjectsRaw, subj) {
+						if !caddy.SliceContains(aps[i].SubjectsRaw, subj) {
 							aps[i].SubjectsRaw = append(aps[i].SubjectsRaw, subj)
 						}
 					}
