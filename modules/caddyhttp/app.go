@@ -29,6 +29,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"github.com/caddyserver/caddy/v2"
+	"github.com/caddyserver/caddy/v2/internal"
 	"github.com/caddyserver/caddy/v2/modules/caddyevents"
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
 )
@@ -207,7 +208,7 @@ func (app *App) Provision(ctx caddy.Context) error {
 			// if no protocols configured explicitly, enable all except h2c
 			if ps == nil {
 				srv.Protocols[pi] = []string{"h1", "h2", "h3"}
-			} else if !caddy.SliceContains(ps, "h1") && (caddy.SliceContains(ps, "h2") || caddy.SliceContains(ps, "h2c")) {
+			} else if !internal.SliceContains(ps, "h1") && (internal.SliceContains(ps, "h2") || internal.SliceContains(ps, "h2c")) {
 				// the Go standard library does not let us serve only HTTP/2 using
 				// http.Server; we would probably need to write our own server
 				return fmt.Errorf("server %s: cannot enable HTTP/2 or H2C without enabling HTTP/1.1; add h1 to protocols or remove h2/h2c", srvName)

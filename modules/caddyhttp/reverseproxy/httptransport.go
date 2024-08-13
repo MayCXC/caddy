@@ -36,6 +36,7 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/caddyserver/caddy/v2"
+	"github.com/caddyserver/caddy/v2/internal"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
 )
@@ -351,7 +352,7 @@ func (h *HTTPTransport) NewTransport(caddyCtx caddy.Context) (*http.Transport, e
 		rt.DisableCompression = !*h.Compression
 	}
 
-	if caddy.SliceContains(h.Versions, "2") {
+	if internal.SliceContains(h.Versions, "2") {
 		if err := http2.ConfigureTransport(rt); err != nil {
 			return nil, err
 		}
@@ -370,13 +371,13 @@ func (h *HTTPTransport) NewTransport(caddyCtx caddy.Context) (*http.Transport, e
 				return nil, fmt.Errorf("making TLS client config for HTTP/3 transport: %v", err)
 			}
 		}
-	} else if len(h.Versions) > 1 && caddy.SliceContains(h.Versions, "3") {
+	} else if len(h.Versions) > 1 && internal.SliceContains(h.Versions, "3") {
 		return nil, fmt.Errorf("if HTTP/3 is enabled to the upstream, no other HTTP versions are supported")
 	}
 
 	// if h2c is enabled, configure its transport (std lib http.Transport
 	// does not "HTTP/2 over cleartext TCP")
-	if caddy.SliceContains(h.Versions, "h2c") {
+	if internal.SliceContains(h.Versions, "h2c") {
 		// crafting our own http2.Transport doesn't allow us to utilize
 		// most of the customizations/preferences on the http.Transport,
 		// because, for some reason, only http2.ConfigureTransport()
