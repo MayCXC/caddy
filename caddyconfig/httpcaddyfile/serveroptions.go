@@ -312,6 +312,7 @@ func applyServerOptions(
 	for key, server := range servers {
 		// each server can have at most one socket fd per listener address
 		server.Socket = make([]*string, len(server.Listen))
+		// each server can have any number of protocols enabled per listener address
 		server.Protocols = make([][]string, len(server.Listen))
 
 		var opts *serverOptions

@@ -385,6 +385,17 @@ func (app *App) Start() error {
 	}
 
 	for srvName, srv := range app.Servers {
+		// TODO why is this needed for caddy respond now?
+		if srv.Socket == nil {
+			srv.Socket = make([]*string, len(srv.Listen))
+		}
+		if srv.Protocols == nil {
+			srv.Protocols = make([][]string, len(srv.Listen))
+			for pi, _ := range srv.Protocols {
+				srv.Protocols[pi] = []string{"h1", "h2", "h3"}
+			}
+		}
+
 		srv.server = &http.Server{
 			ReadTimeout:       time.Duration(srv.ReadTimeout),
 			ReadHeaderTimeout: time.Duration(srv.ReadHeaderTimeout),
