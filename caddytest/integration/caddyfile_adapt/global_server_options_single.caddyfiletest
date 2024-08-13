@@ -80,10 +80,12 @@ foo.com {
 						"should_log_credentials": true
 					},
 					"protocols": [
-						"h1",
-						"h2",
-						"h2c",
-						"h3"
+						[
+							"h1",
+							"h2",
+							"h2c",
+							"h3"
+						]
 					]
 				}
 			}

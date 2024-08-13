@@ -1,12 +1,15 @@
 {
 	servers :80 {
 		socket {env.CADDY_HTTP_FD}
+		protocols h1
 	}
 	servers :443 {
 		socket {env.CADDY_HTTPS_FD}
+		protocols h1 h2
 	}
 	servers udp/:443 {
 		socket {env.CADDY_HTTP3_FD}
+		protocols h3
 	}
 }
 
@@ -41,6 +44,15 @@ foo.com:443 {
 							"terminal": true
 						}
 					],
+					"protocols": [
+						[
+							"h1",
+							"h2"
+						],
+						[
+							"h3"
+						]
+					],
 					"socket": [
 						"{env.CADDY_HTTPS_FD}",
 						"{env.CADDY_HTTP3_FD}"
@@ -61,6 +73,11 @@ foo.com:443 {
 							],
 							"terminal": true
 						}
+					],
+					"protocols": [
+						[
+							"h1"
+						]
 					],
 					"socket": [
 						"{env.CADDY_HTTP_FD}"
