@@ -22,12 +22,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"slices"
 
 	"github.com/caddyserver/certmagic"
 	"github.com/mholt/acmez/v2/acme"
 
 	"github.com/caddyserver/caddy/v2"
-	"github.com/caddyserver/caddy/v2/internal"
 	"github.com/caddyserver/caddy/v2/caddyconfig"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
@@ -466,7 +466,7 @@ func fillInGlobalACMEDefaults(issuer certmagic.Issuer, options map[string]any) e
 	if globalACMECA != nil && acmeIssuer.CA == "" {
 		acmeIssuer.CA = globalACMECA.(string)
 	}
-	if globalACMECARoot != nil && !internal.SliceContains(acmeIssuer.TrustedRootsPEMFiles, globalACMECARoot.(string)) {
+	if globalACMECARoot != nil && !slices.Contains(acmeIssuer.TrustedRootsPEMFiles, globalACMECARoot.(string)) {
 		acmeIssuer.TrustedRootsPEMFiles = append(acmeIssuer.TrustedRootsPEMFiles, globalACMECARoot.(string))
 	}
 	if globalACMEDNS != nil && (acmeIssuer.Challenges == nil || acmeIssuer.Challenges.DNS == nil) {
@@ -635,7 +635,7 @@ outer:
 				} else {
 					// avoid repeated subjects
 					for _, subj := range aps[j].SubjectsRaw {
-						if !internal.SliceContains(aps[i].SubjectsRaw, subj) {
+						if !slices.Contains(aps[i].SubjectsRaw, subj) {
 							aps[i].SubjectsRaw = append(aps[i].SubjectsRaw, subj)
 						}
 					}

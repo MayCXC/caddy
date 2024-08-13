@@ -17,11 +17,11 @@ package httpcaddyfile
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/dustin/go-humanize"
 
 	"github.com/caddyserver/caddy/v2"
-	"github.com/caddyserver/caddy/v2/internal"
 	"github.com/caddyserver/caddy/v2/caddyconfig"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
@@ -195,7 +195,7 @@ func unmarshalCaddyfileServerOptions(d *caddyfile.Dispenser) (any, error) {
 				if proto != "h1" && proto != "h2" && proto != "h2c" && proto != "h3" {
 					return nil, d.Errf("unknown protocol '%s': expected h1, h2, h2c, or h3", proto)
 				}
-				if internal.SliceContains(serverOpts.Protocols, proto) {
+				if slices.Contains(serverOpts.Protocols, proto) {
 					return nil, d.Errf("protocol %s specified more than once", proto)
 				}
 				serverOpts.Protocols = append(serverOpts.Protocols, proto)
@@ -244,7 +244,7 @@ func unmarshalCaddyfileServerOptions(d *caddyfile.Dispenser) (any, error) {
 		case "client_ip_headers":
 			headers := d.RemainingArgs()
 			for _, header := range headers {
-				if internal.SliceContains(serverOpts.ClientIPHeaders, header) {
+				if slices.Contains(serverOpts.ClientIPHeaders, header) {
 					return nil, d.Errf("client IP header %s specified more than once", header)
 				}
 				serverOpts.ClientIPHeaders = append(serverOpts.ClientIPHeaders, header)
