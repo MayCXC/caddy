@@ -875,16 +875,6 @@ func ParseDuration(s string) (time.Duration, error) {
 	return time.ParseDuration(s)
 }
 
-// sliceContains returns true if needle is in haystack.
-func SliceContains(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
-}
-
 // InstanceID returns the UUID for this instance, and generates one if it
 // does not already exist. The UUID is stored in the local data directory,
 // regardless of storage configuration, since each instance is intended to
