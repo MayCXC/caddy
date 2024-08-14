@@ -315,6 +315,9 @@ func applyServerOptions(
 		// find the options that apply to this server
 		for lin, listener := range server.Listen {
 			nextOpts, ok := listenerServerOpts[listener]
+			if !ok {
+				nextOpts, ok = listenerServerOpts[""]
+			}
 			if ok {
 				if opts == nil {
 					opts = nextOpts
@@ -335,9 +338,6 @@ func applyServerOptions(
 					server.Protocols[lin] = nextOpts.Protocols
 				}
 			}
-		}
-		if opts == nil {
-			opts = listenerServerOpts[""]
 		}
 		// if none apply, then move to the next server
 		if opts == nil {
