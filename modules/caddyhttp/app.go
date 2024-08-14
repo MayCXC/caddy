@@ -528,8 +528,8 @@ func (app *App) Start() error {
 						ln = srv.listenerWrappers[i].WrapListener(ln)
 					}
 
-					// handle http2 if use tls listener wrapper
-					if useTLS {
+					// enable HTTP/2 if configured
+					if pok["h2"] {
 						http2lnWrapper := &http2Listener{
 							Listener: ln,
 							server:   srv.server,
@@ -537,6 +537,9 @@ func (app *App) Start() error {
 						}
 						srv.h2listeners = append(srv.h2listeners, http2lnWrapper)
 						ln = http2lnWrapper
+						app.logger.Warn("HTTP/2 enabled",
+							zap.String("network", listenAddr.Network),
+							zap.String("addr", hostport))
 					}
 
 					// if binding to port 0, the OS chooses a port for us;
@@ -557,38 +560,48 @@ func (app *App) Start() error {
 					if pok["h1"] {
 						//nolint:errcheck
 						go srv.server.Serve(ln)
+						app.logger.Warn("HTTP/1 enabled",
+							zap.String("network", listenAddr.Network),
+							zap.String("addr", hostport))
 					}
-				} else if pok["h2"] {
+				}
+
+				if pok["h2"] && !useTLS {
 					// Can only serve h2 with TLS enabled
 					app.logger.Warn("HTTP/2 skipped because it requires TLS",
 						zap.String("network", listenAddr.Network),
-						zap.String("file", hostport))
+						zap.String("addr", hostport))
 				}
 
 				// enable HTTP/3 if configured
 				if pok["h3"] && useTLS {
-					app.logger.Info("enabling HTTP/3 listener", zap.String("addr", hostport))
 					if err := srv.serveHTTP3(listenAddr.At(portOffset), tlsCfg, socket); err != nil {
 						return err
 					}
-					// zap.Bool("http3", srv.h3server != nil)
-				} else if pok["h3"] {
+					app.logger.Info("HTTP/3 enabled",
+						zap.String("network", listenAddr.Network),
+						zap.String("addr", hostport))
+				}
+
+				if pok["h3"] && !useTLS {
 					// Can only serve h3 with TLS enabled
-					app.logger.Warn("HTTP/3 disabled because it requires TLS",
-						zap.String("file", hostport))
+					app.logger.Warn("HTTP/3 skipped because it requires TLS",
+						zap.String("network", listenAddr.Network),
+						zap.String("addr", hostport))
 				}
 			}
 		}
 
 		lnFields := make([]zap.Field, len(srv.Listen))
 		for lnIndex, lnAddr := range srv.Listen {
-			lnFields[lnIndex] = zap.Dict(lnAddr,
+			lnFields[lnIndex] = zap.Dict(strconv.Itoa(lnIndex),
+				zap.String("bind", lnAddr),
 				zap.Stringp("socket", srv.Socket[lnIndex]),
 				zap.Strings("protocols", srv.Protocols[lnIndex]),
 			)
 		}
 
-		srv.logger.Info("server running",append(lnFields, zap.String("name", srvName))...)
+		srv.logger.Info("server running", zap.String("name", srvName), zap.Dict("listen", lnFields...))
 	}
 
 	// finish automatic HTTPS by finally beginning
