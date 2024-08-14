@@ -1067,12 +1067,12 @@ const (
 
 var networkTypesHTTP3 = map[string]string{
 	"unixgram": "unixgram",
-	"udp": "udp",
-	"udp4": "udp4",
-	"udp6": "udp6",
-	"tcp": "udp",
-	"tcp4": "udp4",
-	"tcp6": "udp6",
+	"udp":      "udp",
+	"udp4":     "udp4",
+	"udp6":     "udp6",
+	"tcp":      "udp",
+	"tcp4":     "udp4",
+	"tcp6":     "udp6",
 }
 
 // RegisterNetworkHTTP3 registers a mapping from non-HTTP/3 network to HTTP/3

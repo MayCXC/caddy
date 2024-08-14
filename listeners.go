@@ -171,14 +171,14 @@ func (na NetworkAddress) listen(ctx context.Context, portOffset uint, config net
 	lnKey := listenerKey(na.Network, address)
 
 	if socket != nil {
-		psocket, err := strconv.ParseUint(*socket,0,strconv.IntSize)
+		psocket, err := strconv.ParseUint(*socket, 0, strconv.IntSize)
 		if err != nil {
 			return nil, err
 		}
 		fd := uintptr(psocket)
 		socketFile = socketFiles[fd]
 		if socketFile == nil {
-			socketFile = os.NewFile(fd,lnKey)
+			socketFile = os.NewFile(fd, lnKey)
 			socketFiles[fd] = socketFile
 		}
 	}

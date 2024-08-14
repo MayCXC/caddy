@@ -20,10 +20,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
-	"slices"
 
 	"go.uber.org/zap"
 	"golang.org/x/net/http2"
@@ -204,17 +204,6 @@ func (app *App) Provision(ctx caddy.Context) error {
 			}
 		}
 
-		for pi, ps := range srv.Protocols {
-			// if no protocols configured explicitly, enable all except h2c
-			if ps == nil {
-				srv.Protocols[pi] = []string{"h1", "h2", "h3"}
-			} else if !slices.Contains(ps, "h1") && (slices.Contains(ps, "h2") || slices.Contains(ps, "h2c")) {
-				// the Go standard library does not let us serve only HTTP/2 using
-				// http.Server; we would probably need to write our own server
-				return fmt.Errorf("server %s: cannot enable HTTP/2 or H2C without enabling HTTP/1.1; add h1 to protocols or remove h2/h2c", srvName)
-			}
-		}
-
 		// if not explicitly configured by the user, disallow TLS
 		// client auth bypass (domain fronting) which could
 		// otherwise be exploited by sending an unprotected SNI
@@ -262,6 +251,16 @@ func (app *App) Provision(ctx caddy.Context) error {
 					return fmt.Errorf("server %s, socket %d: %v", srvName, i, err)
 				}
 				srv.Socket[i] = &soOut
+			}
+		}
+
+		for pi, ps := range srv.Protocols {
+			if ps != nil {
+				if !slices.Contains(ps, "h1") && (slices.Contains(ps, "h2") || slices.Contains(ps, "h2c")) {
+					// the Go standard library does not let us serve only HTTP/2 using
+					// http.Server; we would probably need to write our own server
+					return fmt.Errorf("server %s: cannot enable HTTP/2 or H2C without enabling HTTP/1.1; add h1 to protocols or remove h2/h2c", srvName, srv.Listen[pi])
+				}
 			}
 		}
 
@@ -409,10 +408,10 @@ func (app *App) Start() error {
 
 			// check that protocols can be enabled based on network
 			pok := map[string]bool{
-				"h1": false,
-				"h2": false,
+				"h1":  false,
+				"h2":  false,
 				"h2c": false,
-				"h3": false,
+				"h3":  false,
 			}
 			for _, p := range srv.Protocols[lnIndex] {
 				pok[p] = true
@@ -510,10 +509,10 @@ func (app *App) Start() error {
 			socket := srv.Socket[lnIndex]
 
 			pok := map[string]bool{
-				"h1": false,
-				"h2": false,
+				"h1":  false,
+				"h2":  false,
 				"h2c": false,
-				"h3": false,
+				"h3":  false,
 			}
 			for _, p := range srv.Protocols[lnIndex] {
 				pok[p] = true

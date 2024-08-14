@@ -22,14 +22,14 @@ package caddy
 import (
 	"context"
 	"errors"
+	"go.uber.org/zap"
+	"golang.org/x/sys/unix"
 	"io"
 	"io/fs"
 	"net"
 	"os"
 	"sync/atomic"
 	"syscall"
-	"go.uber.org/zap"
-	"golang.org/x/sys/unix"
 )
 
 // reuseUnixSocketWithUnlink copies and reuses the unix domain socket (UDS) if we already
@@ -200,8 +200,8 @@ func (uln *unixListener) Close() error {
 
 type unixConn struct {
 	*net.UnixConn
-	mapKey   string
-	count    *int32 // accessed atomically
+	mapKey string
+	count  *int32 // accessed atomically
 }
 
 func (uc *unixConn) Close() error {

@@ -37,7 +37,7 @@ type serverOptions struct {
 	// The file descriptor of a socket bound to ListenerAddress if it was opened in a parent process
 	Socket *string
 	// The protocols supported by ListenerAddress
-	Protocols            []string
+	Protocols []string
 
 	// These will all map 1:1 to the caddyhttp.Server struct
 	Name                 string
@@ -311,11 +311,6 @@ func applyServerOptions(
 	}
 
 	for key, server := range servers {
-		// each server can have at most one socket fd per listener address
-		server.Socket = make([]*string, len(server.Listen))
-		// each server can have any number of protocols enabled per listener address
-		server.Protocols = make([][]string, len(server.Listen))
-
 		var opts *serverOptions
 		// find the options that apply to this server
 		for lin, listener := range server.Listen {
@@ -324,9 +319,21 @@ func applyServerOptions(
 				if opts == nil {
 					opts = nextOpts
 				}
-				// set the options that apply to each listener for this server
-				server.Socket[lin] = nextOpts.Socket
-				server.Protocols[lin] = nextOpts.Protocols
+				if nextOpts.Socket != nil {
+					if server.Socket == nil {
+						// each server can have at most one socket fd per listener address
+						server.Socket = make([]*string, len(server.Listen))
+					}
+					server.Socket[lin] = nextOpts.Socket
+				}
+				if nextOpts.Protocols != nil {
+					if server.Protocols == nil {
+						// each server can have any number of protocols enabled per listener address
+						server.Protocols = make([][]string, len(server.Listen))
+					}
+					// set the options that apply to each listener for this server
+					server.Protocols[lin] = nextOpts.Protocols
+				}
 			}
 		}
 		if opts == nil {
