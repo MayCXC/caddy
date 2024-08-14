@@ -386,14 +386,72 @@ func (app *App) Start() error {
 	}
 
 	for srvName, srv := range app.Servers {
-		// TODO why is this needed for caddy respond now?
+		srv.addresses = make([]caddy.NetworkAddress, len(srv.Listen))
+
 		if srv.Socket == nil {
 			srv.Socket = make([]*string, len(srv.Listen))
 		}
+
 		if srv.Protocols == nil {
 			srv.Protocols = make([][]string, len(srv.Listen))
-			for pi, _ := range srv.Protocols {
-				srv.Protocols[pi] = []string{"h1", "h2", "h3"}
+		}
+
+		for lnIndex, lnAddr := range srv.Listen {
+			listenAddr, err := caddy.ParseNetworkAddress(lnAddr)
+			if err != nil {
+				return fmt.Errorf("%s: parsing listen address '%s': %v", srvName, lnAddr, err)
+			}
+			srv.addresses[lnIndex] = listenAddr
+
+			if srv.Protocols[lnIndex] == nil {
+				srv.Protocols[lnIndex] = []string{"h1", "h2", "h3"}
+			}
+
+			// check that protocols can be enabled based on network
+			pok := map[string]bool{
+				"h1": false,
+				"h2": false,
+				"h2c": false,
+				"h3": false,
+			}
+			for _, p := range srv.Protocols[lnIndex] {
+				pok[p] = true
+			}
+
+			if listenAddr.IsUnixNetwork() {
+				// Can only serve HTTP/1 and HTTP/2 on a SOCK_STREAM UDS
+				if listenAddr.Network != "unix" && (pok["h1"] || pok["h2"] || pok["h2c"]) {
+					pok["h1"] = false
+					pok["h2"] = false
+					pok["h2c"] = false
+					app.logger.Warn("HTTP/1 and HTTP/2 disabled because they require a unix/ network to bind from a UDS",
+						zap.String("network", listenAddr.Network),
+						zap.String("file", listenAddr.Host))
+				}
+				// Can only serve HTTP/3 on a SOCK_DGRAM UDS
+				if listenAddr.Network != "unixgram" && pok["h3"] {
+					pok["h3"] = false
+					app.logger.Warn("HTTP/3 disabled because it requires a unixgram/ network to bind from a UDS",
+						zap.String("network", listenAddr.Network),
+						zap.String("file", listenAddr.Host))
+				}
+			} else {
+				if listenAddr.Network != "tcp" && listenAddr.Network != "tcp4" && listenAddr.Network != "tcp6" && (pok["h1"] || pok["h2"] || pok["h2c"]) {
+					pok["h1"] = false
+					pok["h2"] = false
+					pok["h2c"] = false
+					app.logger.Warn("HTTP/1 and HTTP/2 disabled because they require a tcp/ network to bind from a network socket",
+						zap.String("network", listenAddr.Network),
+						zap.String("addr", listenAddr.Host))
+				}
+			}
+
+			// remove disabled protocols
+			srv.Protocols[lnIndex] = nil
+			for p, ok := range pok {
+				if ok {
+					srv.Protocols[lnIndex] = append(srv.Protocols[lnIndex], p)
+				}
 			}
 		}
 
@@ -409,6 +467,7 @@ func (app *App) Start() error {
 				return context.WithValue(ctx, ConnCtxKey, c)
 			},
 		}
+
 		h2server := new(http2.Server)
 
 		// disable HTTP/2, which we enabled by default during provisioning
@@ -446,63 +505,30 @@ func (app *App) Start() error {
 		}
 
 		for lnIndex, lnAddr := range srv.Listen {
-			listenAddr, err := caddy.ParseNetworkAddress(lnAddr)
-			if err != nil {
-				return fmt.Errorf("%s: parsing listen address '%s': %v", srvName, lnAddr, err)
-			}
-			srv.addresses = append(srv.addresses, listenAddr)
+			listenAddr := srv.addresses[lnIndex]
 
-			// check that protocols can be enabled based on network
+			socket := srv.Socket[lnIndex]
+
 			pok := map[string]bool{
 				"h1": false,
 				"h2": false,
 				"h2c": false,
 				"h3": false,
 			}
-
 			for _, p := range srv.Protocols[lnIndex] {
 				pok[p] = true
-			}
-
-			if listenAddr.IsUnixNetwork() {
-				// Can only serve HTTP/1 and HTTP/2 on a SOCK_STREAM UDS
-				if listenAddr.Network != "unix" && (pok["h1"] || pok["h2"] || pok["h2c"]) {
-					app.logger.Warn("HTTP/1 and HTTP/2 disabled because they require a unix network for a UDS",
-						zap.String("network", listenAddr.Network),
-						zap.String("file", listenAddr.Host))
-					pok["h1"] = false
-					pok["h2"] = false
-					pok["h2c"] = false
-				}
-				// Can only serve HTTP/3 on a SOCK_DGRAM UDS
-				if listenAddr.Network != "unixgram" && pok["h3"] {
-					app.logger.Warn("HTTP/3 disabled because it requires a unixgram network for a UDS",
-						zap.String("network", listenAddr.Network),
-						zap.String("file", listenAddr.Host))
-					pok["h3"] = false
-				}
-			}
-
-			// remove disabled protocols
-			srv.Protocols[lnIndex] = nil
-			for p, ok := range pok {
-				if ok {
-					srv.Protocols[lnIndex] = append(srv.Protocols[lnIndex], p)
-				}
 			}
 
 			for portOffset := uint(0); portOffset < listenAddr.PortRangeSize(); portOffset++ {
 				// create the listener for this socket
 				hostport := listenAddr.JoinHostPort(portOffset)
-				var socket *string
-				if srv.Socket != nil {
-					socket = srv.Socket[lnIndex]
-				}
+
 				// enable TLS if there is a policy and if this is not the HTTP port
 				useTLS := len(srv.TLSConnPolicies) > 0 && int(listenAddr.StartPort+portOffset) != app.httpPort()
 
 				if pok["h1"] || pok["h2"] && useTLS || pok["h2c"] {
 					lnAny, err := listenAddr.ListenWithSocket(app.ctx, portOffset, net.ListenConfig{KeepAlive: time.Duration(srv.KeepAliveInterval)}, socket)
+
 					if err != nil {
 						return fmt.Errorf("listening on %s: %v", listenAddr.At(portOffset), err)
 					}
@@ -537,7 +563,7 @@ func (app *App) Start() error {
 						}
 						srv.h2listeners = append(srv.h2listeners, http2lnWrapper)
 						ln = http2lnWrapper
-						app.logger.Warn("HTTP/2 enabled",
+						app.logger.Info("HTTP/2 enabled",
 							zap.String("network", listenAddr.Network),
 							zap.String("addr", hostport))
 					}
@@ -560,7 +586,7 @@ func (app *App) Start() error {
 					if pok["h1"] {
 						//nolint:errcheck
 						go srv.server.Serve(ln)
-						app.logger.Warn("HTTP/1 enabled",
+						app.logger.Info("HTTP/1 enabled",
 							zap.String("network", listenAddr.Network),
 							zap.String("addr", hostport))
 					}
