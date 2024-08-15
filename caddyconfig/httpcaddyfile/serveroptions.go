@@ -312,36 +312,55 @@ func applyServerOptions(
 
 	for key, server := range servers {
 		var opts *serverOptions
-		// find the options that apply to this server
-		for lin, listener := range server.Listen {
-			nextOpts, ok := listenerServerOpts[listener]
-			if !ok {
-				nextOpts, ok = listenerServerOpts[""]
-			}
+		for _, listener := range server.Listen {
+			serverOpts, ok := listenerServerOpts[listener]
 			if ok {
-				if opts == nil {
-					opts = nextOpts
-				}
-				if nextOpts.Socket != nil {
-					if server.Socket == nil {
-						// each server can have at most one socket fd per listener address
-						server.Socket = make([]*string, len(server.Listen))
-					}
-					server.Socket[lin] = nextOpts.Socket
-				}
-				if nextOpts.Protocols != nil {
-					if server.Protocols == nil {
-						// each server can have any number of protocols enabled per listener address
-						server.Protocols = make([][]string, len(server.Listen))
-					}
-					// set the options that apply to each listener for this server
-					server.Protocols[lin] = nextOpts.Protocols
-				}
+				opts = serverOpts
+				break
 			}
 		}
+		defaultOpts := listenerServerOpts[""]
+
 		// if none apply, then move to the next server
-		if opts == nil {
+		if opts == nil && defaultOpts == nil {
 			continue
+		}
+
+		// find the options that apply to each listener
+		for lin, listener := range server.Listen {
+			var nextOpts *serverOptions
+
+			if opts != nil {
+				serverOpts, ok := listenerServerOpts[listener]
+				if ok {
+					nextOpts = serverOpts
+				} else {
+					continue
+				}
+			} else {
+				nextOpts = defaultOpts
+			}
+
+			if nextOpts.Socket != nil {
+				if server.Socket == nil {
+					// each server can have at most one socket fd per listener address
+					server.Socket = make([]*string, len(server.Listen))
+				}
+				server.Socket[lin] = nextOpts.Socket
+			}
+
+			if nextOpts.Protocols != nil {
+				if server.Protocols == nil {
+					// each server can have any number of protocols enabled per listener address
+					server.Protocols = make([][]string, len(server.Listen))
+				}
+				// set the options that apply to each listener for this server
+				server.Protocols[lin] = nextOpts.Protocols
+			}
+		}
+
+		if opts == nil {
+			opts = defaultOpts
 		}
 
 		// set all the options
