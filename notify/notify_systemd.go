@@ -14,6 +14,9 @@
 
 // Package notify provides facilities for notifying process managers
 // of state changes, mainly for when running as a system service.
+
+//go:build linux && !nosystemd
+
 package notify
 
 import (
